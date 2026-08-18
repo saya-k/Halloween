@@ -653,9 +653,9 @@
       .complete-header-lottie {
         position: relative;
         z-index: 1;
-        width: min(86vw, 460px);
-        height: min(86vw, 460px);
-        max-height: min(58dvh, 460px);
+        width: min(70vw, 360px);
+        height: min(70vw, 360px);
+        max-height: min(46dvh, 360px);
         pointer-events: none;
       }
 
@@ -803,7 +803,7 @@
         '<div class="scan-corner br"></div>' +
         '<div class="scan-line"></div>' +
         '<div class="scan-guide-text">Place the object inside the frame.</div>' +
-        '<div class="scan-version">1.0.29</div>';
+        '<div class="scan-version">1.0.30</div>';
       document.body.appendChild(scanGuide);
     }
 
@@ -1562,7 +1562,7 @@
         renderer: 'svg',
         loop: false,
         autoplay: false,
-        path: './assets/halloween-text-loading.json',
+        path: './assets/halloween-pumpkin-black-cat.json',
         rendererSettings: {
           preserveAspectRatio: 'xMidYMid meet',
         },
@@ -1637,7 +1637,7 @@
         renderer: 'svg',
         loop: true,
         autoplay: false,
-        path: './assets/halloween-pumpkin-black-cat.json',
+        path: './assets/halloween-text-loading.json',
       });
       let settled = false;
       let readyTimer;
