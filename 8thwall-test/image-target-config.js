@@ -812,7 +812,7 @@
         '<div class="scan-corner br"></div>' +
         '<div class="scan-line"></div>' +
         '<div class="scan-guide-text">Place the object inside the frame.</div>' +
-        '<div class="scan-version">1.0.33</div>';
+        '<div class="scan-version">1.0.34</div>';
       document.body.appendChild(scanGuide);
     }
 
@@ -1609,14 +1609,15 @@
       const frameRate = Number(animation.frameRate || 29.97);
       const totalFrames = Number(animation.totalFrames || 201);
       const forwardEndFrame = Math.min(totalFrames - 1, Math.round(frameRate * 4.5));
-      const bodyReturnEndFrame = Math.round(frameRate * 3.17);
-      const handsReturnStartFrame = Math.round(frameRate * 1.17);
+      const bodyReturnEndFrame = Math.round(frameRate * 3.0);
+      const handsReturnStartFrame = Math.round(frameRate * 1.0);
       const finish = () => {
         if (finished || playbackToken !== introPlaybackToken) return;
         finished = true;
         clearTimeout(fallbackTimer);
         animation.removeEventListener('complete', handleComplete);
         animation.pause();
+        animation.setSpeed(1);
         if (introLottieOverlay) introLottieOverlay.classList.add('is-fading');
         setTimeout(() => {
           if (playbackToken !== introPlaybackToken) return;
@@ -1629,24 +1630,27 @@
         if (finished || playbackToken !== introPlaybackToken) return;
         if (playbackPhase === 'forward') {
           playbackPhase = 'body-return';
+          animation.setSpeed(1);
           animation.playSegments([forwardEndFrame, bodyReturnEndFrame], true);
           return;
         }
         if (playbackPhase === 'body-return') {
           playbackPhase = 'hands-return';
+          animation.setSpeed(2);
           animation.playSegments([handsReturnStartFrame, 0], true);
           return;
         }
         finish();
       };
       animation.loop = false;
+      animation.setSpeed(1);
       animation.setDirection(1);
       animation.goToAndStop(0, true);
       animation.addEventListener('complete', handleComplete);
       requestAnimationFrame(() => animation.playSegments([0, forwardEndFrame], true));
       const sequenceMs = ((forwardEndFrame
         + (forwardEndFrame - bodyReturnEndFrame)
-        + handsReturnStartFrame) / frameRate) * 1000;
+        + (handsReturnStartFrame / 2)) / frameRate) * 1000;
       fallbackTimer = setTimeout(finish, sequenceMs + fadeDurationMs + 500);
     })).catch((error) => {
       console.warn('[Image Target AR] intro lottie failed:', error);
@@ -1662,6 +1666,7 @@
     if (introLottieOverlay) introLottieOverlay.classList.remove('is-fading');
     if (!introLottieAnimation) return;
     introLottieAnimation.stop();
+    introLottieAnimation.setSpeed(1);
     introLottieAnimation.setDirection(1);
     introLottieAnimation.goToAndStop(0, true);
   }
