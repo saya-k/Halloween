@@ -32,6 +32,8 @@
   let arCanvas;
   let xrPipelineStarted = false;
   let arCanvasResizeInstalled = false;
+  let arPrepared = false;
+  let arPreparing = false;
 
   let appStarted = false;
   let cameraPermissionGranted = false;
@@ -39,8 +41,8 @@
   let cameraStarted = false;
   let waitingForCameraReady = false;
   let bootRequested = false;
-  let cameraWaitToken = 0;
   let xrLoadTimer = 0;
+  let cameraRetryRevealTimer = 0;
   let cameraDebugStatus = '';
   const state = {
     childName: localStorage.getItem(NAME_KEY) || '',
@@ -689,7 +691,7 @@
       loadingText = document.getElementById('lag-loading-text');
       cameraRetryButton = document.getElementById('camera-permission-retry');
       pcTestButton = document.getElementById('pc-test-mode-button');
-      cameraRetryButton.addEventListener('click', () => requestCameraPermissionGate(true));
+      cameraRetryButton.addEventListener('click', retryCameraFromUserGesture);
       pcTestButton.addEventListener('click', enterPcTestMode);
     }
 
@@ -795,7 +797,7 @@
         '<div class="scan-corner br"></div>' +
         '<div class="scan-line"></div>' +
         '<div class="scan-guide-text">Place the object inside the frame.</div>' +
-        '<div class="scan-version">1.0.26</div>';
+        '<div class="scan-version">1.0.27</div>';
       document.body.appendChild(scanGuide);
     }
 
@@ -916,29 +918,21 @@
     return 'Camera access failed. Tap Allow camera to try again.';
   }
 
-  async function requestIosMotionPermission() {
-    const requesters = [window.DeviceMotionEvent, window.DeviceOrientationEvent]
-      .filter((api) => api && typeof api.requestPermission === 'function');
-    for (const api of requesters) {
-      const result = await api.requestPermission();
-      if (result !== 'granted') throw new Error('motion permission denied');
-    }
-  }
-
-  async function requestCameraPermissionGate(fromUserGesture) {
+  function requestCameraPermissionGate(fromUserGesture) {
     ensureUi();
-    if (!fromUserGesture && !cameraPermissionGranted) {
+    if (!fromUserGesture) {
       showLoadingOverlay();
       hideScanStatus();
-      setLoadingMessage('Tap to start AR camera');
+      setLoadingMessage(arPrepared ? 'Tap to start AR camera' : 'Preparing AR camera...');
       if (cameraRetryButton) cameraRetryButton.textContent = 'Tap to start AR';
-      setCameraRetryVisible(true);
+      setCameraRetryVisible(arPrepared);
       setPcTestButtonVisible(true);
       return;
     }
-    if (cameraPermissionGranted) {
-      waitForCameraReady();
-      bootAr();
+    if (!arPrepared) {
+      setLoadingMessage('Preparing AR camera...');
+      setCameraRetryVisible(false);
+      prepareAr();
       return;
     }
     if (cameraPermissionInFlight) return;
@@ -947,14 +941,9 @@
     hideScanStatus();
     setCameraRetryVisible(false);
     setPcTestButtonVisible(false);
-    if (cameraRetryButton) cameraRetryButton.textContent = 'Allow camera';
-    setLoadingMessage('Requesting camera access...');
+    if (cameraRetryButton) cameraRetryButton.textContent = 'Try again';
+    setLoadingMessage(cameraPermissionGranted ? 'Restarting AR camera...' : 'Requesting camera access...');
     try {
-      await requestIosMotionPermission();
-      cameraPermissionGranted = true;
-      setCameraRetryVisible(false);
-      setPcTestButtonVisible(false);
-      setLoadingMessage('Starting AR camera... v1.0.26');
       waitForCameraReady();
       bootAr();
     } catch (error) {
@@ -972,22 +961,48 @@
   function waitForCameraReady() {
     waitingForCameraReady = true;
     showLoadingOverlay();
-    const token = ++cameraWaitToken;
-    setTimeout(() => {
-      if (!waitingForCameraReady || token !== cameraWaitToken) return;
-      if (!cameraStarted) {
-        waitingForCameraReady = false;
-        setLoadingMessage('AR camera did not start. Open in Safari and tap Try again.');
-        if (cameraRetryButton) cameraRetryButton.textContent = 'Try again';
-        setCameraRetryVisible(true);
-        setPcTestButtonVisible(true);
-        return;
+    setLoadingMessage(cameraPermissionGranted ? 'Restarting AR camera...' : 'Requesting camera access...');
+    setCameraRetryVisible(false);
+    setPcTestButtonVisible(false);
+    clearTimeout(cameraRetryRevealTimer);
+    cameraRetryRevealTimer = setTimeout(() => {
+      if (!waitingForCameraReady || cameraStarted) return;
+      if (cameraRetryButton) cameraRetryButton.textContent = 'Try again';
+      setCameraRetryVisible(true);
+    }, 2500);
+  }
+
+  function showCameraFailure(message, error) {
+    if (error) console.warn('[Christmas AR] camera start failed:', error);
+    cameraStarted = false;
+    waitingForCameraReady = false;
+    cameraPermissionInFlight = false;
+    clearTimeout(cameraRetryRevealTimer);
+    showLoadingOverlay();
+    hideScanStatus();
+    setLoadingMessage(message || 'AR camera failed. Check Safari camera permission and tap Try again.');
+    if (cameraRetryButton) cameraRetryButton.textContent = 'Try again';
+    setCameraRetryVisible(true);
+    setPcTestButtonVisible(true);
+  }
+
+  function retryCameraFromUserGesture() {
+    if (!arPrepared) {
+      requestCameraPermissionGate(true);
+      return;
+    }
+
+    if (appStarted && !cameraStarted) {
+      clearTimeout(cameraRetryRevealTimer);
+      try {
+        if (window.XR8 && typeof window.XR8.stop === 'function') window.XR8.stop();
+      } catch (error) {
+        console.warn('[Christmas AR] camera stop before retry failed:', error);
       }
-      waitingForCameraReady = false;
-      hideLoadingOverlay();
-      showScanStatus();
-      setScanStatus('Scanning...');
-    }, 9000);
+      appStarted = false;
+    }
+
+    requestCameraPermissionGate(true);
   }
 
   function setScanStatus(text) {
@@ -1048,16 +1063,11 @@
   }
 
   function startApp() {
-    if (appStarted || xrPipelineStarted) return;
+    if (appStarted || !arPrepared) return;
     appStarted = true;
-    xrPipelineStarted = true;
     try {
       const canvas = ensureArCanvas();
       syncArCanvasSize();
-      if (window.XR8.GlTextureRenderer && window.XR8.GlTextureRenderer.pipelineModule) {
-        window.XR8.addCameraPipelineModule(window.XR8.GlTextureRenderer.pipelineModule());
-      }
-      window.XR8.addCameraPipelineModule(window.XR8.XrController.pipelineModule());
       const runConfig = { canvas };
       if (window.XR8.XrConfig && window.XR8.XrConfig.device) {
         runConfig.allowedDevices = window.XR8.XrConfig.device().ANY;
@@ -1066,12 +1076,7 @@
     } catch (error) {
       console.error('[Christmas AR] direct XR startup failed:', error);
       appStarted = false;
-      xrPipelineStarted = false;
-      setLoadingMessage(`AR startup failed: ${errorText(error)}`);
-      if (cameraRetryButton) cameraRetryButton.textContent = 'Try again';
-      setCameraRetryVisible(true);
-      setPcTestButtonVisible(true);
-      hideScanStatus();
+      showCameraFailure(`AR startup failed: ${errorText(error)}`, error);
     }
   }
 
@@ -1111,6 +1116,8 @@
     });
   }
   async function configureImageTargets() {
+    if (arPrepared || arPreparing) return;
+    arPreparing = true;
     bootRequested = true;
     try {
       installStyles();
@@ -1125,58 +1132,80 @@
         imageTargets: targetNames,
       });
 
-      window.XR8.addCameraPipelineModule({
-        name: 'christmas-image-target-flow',
-        onCameraStatusChange: ({ status }) => {
-          console.log('[Christmas AR] camera status:', status);
-          setCameraDebugStatus(status);
-          if (status === 'hasVideo') {
-            cameraStarted = true;
-            waitingForCameraReady = false;
-            hideLoadingOverlay();
-          } else if (status === 'failed') {
-            waitingForCameraReady = false;
-            setLoadingMessage('AR camera failed. Check Safari camera permission and tap Try again.');
-            if (cameraRetryButton) cameraRetryButton.textContent = 'Try again';
-            setCameraRetryVisible(true);
-            setPcTestButtonVisible(true);
-          }
-        },
-        onStart: () => {
-          cameraStarted = true;
-          waitingForCameraReady = false;
-          hideLoadingOverlay();
-          if (state.childName) {
-            showScanStatus();
-            setScanStatus('Scanning...');
-          } else {
-            hideScanStatus();
-            showNameGate(false);
-          }
-        },
-        listeners: [
-          {
-            event: 'reality.imagefound',
-            process: ({ detail }) => handleTargetFound(detail && detail.name),
+      if (!xrPipelineStarted) {
+        if (window.XR8.GlTextureRenderer && window.XR8.GlTextureRenderer.pipelineModule) {
+          window.XR8.addCameraPipelineModule(window.XR8.GlTextureRenderer.pipelineModule());
+        }
+        window.XR8.addCameraPipelineModule(window.XR8.XrController.pipelineModule());
+        window.XR8.addCameraPipelineModule({
+          name: 'christmas-image-target-flow',
+          onCameraStatusChange: ({ status }) => {
+            console.log('[Christmas AR] camera status:', status);
+            cameraDebugStatus = status;
+            if (status === 'requesting') {
+              setLoadingMessage('Allow camera access to start AR.');
+            } else if (status === 'hasStream') {
+              cameraPermissionGranted = true;
+              setLoadingMessage('Starting AR camera...');
+            } else if (status === 'hasVideo') {
+              cameraPermissionGranted = true;
+              cameraPermissionInFlight = false;
+              cameraStarted = true;
+              waitingForCameraReady = false;
+              clearTimeout(cameraRetryRevealTimer);
+              hideLoadingOverlay();
+              setCameraRetryVisible(false);
+              setPcTestButtonVisible(false);
+              if (state.childName) {
+                showScanStatus();
+                setScanStatus('Scanning...');
+              } else {
+                hideScanStatus();
+                showNameGate(false);
+              }
+            } else if (status === 'failed') {
+              showCameraFailure('AR camera failed. Check Safari camera permission and tap Try again.');
+            }
           },
-          {
-            event: 'reality.imageupdated',
-            process: ({ detail }) => {
-              if (!state.experienceStarted) setScanStatus('Scanning...');
+          onException: (error) => {
+            showCameraFailure(`AR camera error: ${errorText(error)}`, error);
+          },
+          onStart: () => {
+            console.log('[Christmas AR] camera pipeline started');
+          },
+          listeners: [
+            {
+              event: 'reality.imagefound',
+              process: ({ detail }) => handleTargetFound(detail && detail.name),
             },
-          },
-          {
-            event: 'reality.imagelost',
-            process: () => {
-              if (!state.experienceStarted) setScanStatus(state.childName ? 'Scanning...' : 'Set name first');
+            {
+              event: 'reality.imageupdated',
+              process: ({ detail }) => {
+                if (!state.experienceStarted) setScanStatus('Scanning...');
+              },
             },
-          },
-        ],
-      });
+            {
+              event: 'reality.imagelost',
+              process: () => {
+                if (!state.experienceStarted) setScanStatus(state.childName ? 'Scanning...' : 'Set name first');
+              },
+            },
+          ],
+        });
+        xrPipelineStarted = true;
+      }
 
-      startApp();
+      arPrepared = true;
+      arPreparing = false;
+      bootRequested = false;
+      clearTimeout(xrLoadTimer);
+      setLoadingMessage('Tap to start AR camera');
+      if (cameraRetryButton) cameraRetryButton.textContent = 'Tap to start AR';
+      setCameraRetryVisible(true);
+      setPcTestButtonVisible(true);
     } catch (error) {
       console.error('[Christmas AR] image target configuration failed:', error);
+      arPreparing = false;
       bootRequested = false;
       setLoadingMessage(`AR setup failed: ${errorText(error)}`);
       setCameraRetryVisible(true);
@@ -1186,17 +1215,28 @@
   }
 
   function bootAr() {
-    if (bootRequested || appStarted) return;
+    if (appStarted) return;
+    if (!arPrepared) {
+      prepareAr();
+      return;
+    }
+    startApp();
+  }
+
+  function prepareAr() {
+    if (arPrepared || arPreparing || bootRequested) return;
     bootRequested = true;
+    setLoadingMessage('Loading AR engine...');
+    setCameraRetryVisible(false);
     if (window.XR8) {
       configureImageTargets();
       return;
     }
-    setLoadingMessage('Loading AR engine...');
     window.addEventListener('xrloaded', configureImageTargets, { once: true });
     clearTimeout(xrLoadTimer);
     xrLoadTimer = setTimeout(() => {
-      if (window.XR8 || appStarted || cameraStarted) return;
+      if (window.XR8 || arPrepared) return;
+      arPreparing = false;
       bootRequested = false;
       waitingForCameraReady = false;
       setLoadingMessage('AR engine failed to load. Check network/VPN, then tap Try again.');
@@ -1611,6 +1651,7 @@
   showLoadingOverlay();
   hideScanStatus();
   requestCameraPermissionGate(false);
+  prepareAr();
 })();
 
 
