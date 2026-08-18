@@ -1,6 +1,7 @@
 ﻿(function () {
   const targetNames = ['1', '2', '3', '4', '5'];
   const NAME_KEY = 'christmasChildName';
+  const EXPERIENCE_VIDEO_SRC = './assets/Christmas.mp4';
   const PC_TEST_MODE = new URLSearchParams(window.location.search).get('pcTest') === '1';
 
   let scanStatus;
@@ -108,7 +109,7 @@
       }
 
       .lag-loading-card img {
-        width: min(46vw, 220px);
+        width: min(32vw, 150px);
         height: auto;
         display: block;
       }
@@ -681,7 +682,7 @@
       loadingOverlay.id = 'lag-loading-overlay';
       loadingOverlay.innerHTML = `
         <div class="lag-loading-card">
-          <img src="./assets/lag-logo.jpg" alt="LAG" />
+          <img class="lag-loading-logo" src="./assets/lag-logo.jpg" alt="LAG" />
           <div id="lag-loading-text" class="lag-loading-text">Requesting camera access...</div>
           <button id="camera-permission-retry" type="button">Allow camera</button>
           <button id="pc-test-mode-button" type="button">PC test mode</button>
@@ -736,7 +737,7 @@
           <div id="intro-lottie"></div>
         </div>
         <div id="christmas-video-overlay" class="hidden">
-          <video id="christmas-video" src="./assets/Christmas.mp4" playsinline webkit-playsinline preload="auto"></video>
+          <video id="christmas-video" playsinline webkit-playsinline preload="none"></video>
         </div>
         <div id="complete-overlay" class="hidden">
           <div class="complete-card">
@@ -776,7 +777,7 @@
       document.getElementById('restart-button').addEventListener('click', restartExperience);
       preloadPostcardLottie();
       ensureCompleteHeaderLottie().catch((error) => {
-        console.warn('[Christmas AR] complete lottie preload failed:', error);
+        console.warn('[Image Target AR] complete lottie preload failed:', error);
       });
     }
 
@@ -853,6 +854,14 @@
 
   function hideLoadingOverlay() {
     if (loadingOverlay) loadingOverlay.classList.add('hidden');
+  }
+
+  function releaseLoadingLogo() {
+    if (!loadingOverlay) return;
+    const logo = loadingOverlay.querySelector('.lag-loading-logo');
+    if (!logo) return;
+    logo.removeAttribute('src');
+    logo.remove();
   }
 
   function showLoadingOverlay() {
@@ -947,7 +956,7 @@
       waitForCameraReady();
       bootAr();
     } catch (error) {
-      console.warn('[Christmas AR] camera permission gate failed:', error);
+      console.warn('[Image Target AR] camera permission gate failed:', error);
       cameraPermissionGranted = false;
       setLoadingMessage(cameraErrorText(error));
       if (cameraRetryButton) cameraRetryButton.textContent = 'Try again';
@@ -973,7 +982,7 @@
   }
 
   function showCameraFailure(message, error) {
-    if (error) console.warn('[Christmas AR] camera start failed:', error);
+    if (error) console.warn('[Image Target AR] camera start failed:', error);
     cameraStarted = false;
     waitingForCameraReady = false;
     cameraPermissionInFlight = false;
@@ -997,7 +1006,7 @@
       try {
         if (window.XR8 && typeof window.XR8.stop === 'function') window.XR8.stop();
       } catch (error) {
-        console.warn('[Christmas AR] camera stop before retry failed:', error);
+        console.warn('[Image Target AR] camera stop before retry failed:', error);
       }
       appStarted = false;
     }
@@ -1074,7 +1083,7 @@
       }
       window.XR8.run(runConfig);
     } catch (error) {
-      console.error('[Christmas AR] direct XR startup failed:', error);
+      console.error('[Image Target AR] direct XR startup failed:', error);
       appStarted = false;
       showCameraFailure(`AR startup failed: ${errorText(error)}`, error);
     }
@@ -1125,7 +1134,7 @@
       const imageTargetData = await loadImageTargets();
       await waitForXrController();
 
-      window.__christmasImageTargetData = imageTargetData;
+      window.__imageTargetData = imageTargetData;
       window.XR8.XrController.configure({
         disableWorldTracking: true,
         imageTargetData,
@@ -1138,9 +1147,9 @@
         }
         window.XR8.addCameraPipelineModule(window.XR8.XrController.pipelineModule());
         window.XR8.addCameraPipelineModule({
-          name: 'christmas-image-target-flow',
+          name: 'image-target-flow',
           onCameraStatusChange: ({ status }) => {
-            console.log('[Christmas AR] camera status:', status);
+            console.log('[Image Target AR] camera status:', status);
             cameraDebugStatus = status;
             if (status === 'requesting') {
               setLoadingMessage('Allow camera access to start AR.');
@@ -1154,6 +1163,7 @@
               waitingForCameraReady = false;
               clearTimeout(cameraRetryRevealTimer);
               hideLoadingOverlay();
+              releaseLoadingLogo();
               setCameraRetryVisible(false);
               setPcTestButtonVisible(false);
               if (state.childName) {
@@ -1171,7 +1181,7 @@
             showCameraFailure(`AR camera error: ${errorText(error)}`, error);
           },
           onStart: () => {
-            console.log('[Christmas AR] camera pipeline started');
+            console.log('[Image Target AR] camera pipeline started');
           },
           listeners: [
             {
@@ -1204,7 +1214,7 @@
       setCameraRetryVisible(true);
       setPcTestButtonVisible(true);
     } catch (error) {
-      console.error('[Christmas AR] image target configuration failed:', error);
+      console.error('[Image Target AR] image target configuration failed:', error);
       arPreparing = false;
       bootRequested = false;
       setLoadingMessage(`AR setup failed: ${errorText(error)}`);
@@ -1257,12 +1267,21 @@
     startChristmasFlow(targetName);
   }
 
+  function loadExperienceVideo() {
+    if (!christmasVideo || christmasVideo.dataset.sourceAttached === 'true') return;
+    christmasVideo.preload = 'auto';
+    christmasVideo.src = EXPERIENCE_VIDEO_SRC;
+    christmasVideo.dataset.sourceAttached = 'true';
+    christmasVideo.load();
+  }
+
   function startChristmasFlow(targetName) {
-    console.log('[Christmas AR] start flow:', targetName);
+    console.log('[Image Target AR] start flow:', targetName);
     const flowToken = ++state.flowToken;
     state.experienceStarted = true;
     state.postcardReady = false;
     state.videoPlaying = false;
+    loadExperienceVideo();
     hideScanStatus();
     hidePcTestPanel();
     preloadPostcardLottie();
@@ -1333,7 +1352,7 @@
       animation.setDirection(1);
       animation.goToAndStop(0, true);
     }).catch((error) => {
-      console.warn('[Christmas AR] postcard lottie preload failed:', error);
+      console.warn('[Image Target AR] postcard lottie preload failed:', error);
     });
   }
 
@@ -1371,7 +1390,7 @@
         if (postcardButton) postcardButton.classList.remove('lottie-intro-fade');
       }, 1020);
     }).catch((error) => {
-      console.warn('[Christmas AR] postcard lottie failed:', error);
+      console.warn('[Image Target AR] postcard lottie failed:', error);
       if (postcardButton) postcardButton.classList.add('lottie-visible', 'lottie-done');
     });
   }
@@ -1402,7 +1421,7 @@
         : 1800;
       setTimeout(finish, totalMs + 180);
     })).catch((error) => {
-      console.warn('[Christmas AR] postcard lottie play failed:', error);
+      console.warn('[Image Target AR] postcard lottie play failed:', error);
     });
   }
 
@@ -1475,7 +1494,7 @@
         : 5200;
       setTimeout(finish, totalMs + 120);
     })).catch((error) => {
-      console.warn('[Christmas AR] intro lottie failed:', error);
+      console.warn('[Image Target AR] intro lottie failed:', error);
       if (introLottieOverlay) introLottieOverlay.classList.add('hidden');
       revealPostcard();
     });
@@ -1531,7 +1550,7 @@
       animation.loop = true;
       animation.goToAndPlay(0, true);
     }).catch((error) => {
-      console.warn('[Christmas AR] complete lottie failed:', error);
+      console.warn('[Image Target AR] complete lottie failed:', error);
     });
   }
 
@@ -1602,6 +1621,7 @@
   async function openPostcard() {
     if (!state.postcardReady || state.videoPlaying) return;
     state.videoPlaying = true;
+    loadExperienceVideo();
     try { if ('speechSynthesis' in window) speechSynthesis.cancel(); } catch {}
     postcardButton.classList.remove('opening');
     await playPostcardLottieForward();
@@ -1612,7 +1632,7 @@
     try {
       await christmasVideo.play();
     } catch (error) {
-      console.warn('[Christmas AR] video play blocked:', error);
+      console.warn('[Image Target AR] video play blocked:', error);
     }
   }
 
