@@ -654,9 +654,8 @@
         position: relative;
         z-index: 1;
         width: min(86vw, 460px);
-        height: min(42vw, 230px);
-        transform: scale(2);
-        transform-origin: center center;
+        height: min(86vw, 460px);
+        max-height: min(58dvh, 460px);
         pointer-events: none;
       }
 
@@ -804,7 +803,7 @@
         '<div class="scan-corner br"></div>' +
         '<div class="scan-line"></div>' +
         '<div class="scan-guide-text">Place the object inside the frame.</div>' +
-        '<div class="scan-version">1.0.28</div>';
+        '<div class="scan-version">1.0.29</div>';
       document.body.appendChild(scanGuide);
     }
 
@@ -1563,7 +1562,7 @@
         renderer: 'svg',
         loop: false,
         autoplay: false,
-        path: './assets/gingerbread-socks-intro.json',
+        path: './assets/halloween-text-loading.json',
         rendererSettings: {
           preserveAspectRatio: 'xMidYMid meet',
         },
@@ -1638,7 +1637,7 @@
         renderer: 'svg',
         loop: true,
         autoplay: false,
-        path: './assets/merry-christmas-header.json?v=completion-header-lottie-20260720',
+        path: './assets/halloween-pumpkin-black-cat.json',
       });
       let settled = false;
       let readyTimer;
