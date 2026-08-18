@@ -19,6 +19,7 @@
   let introLottieContainer;
   let introLottieAnimation;
   let introLottiePlayed = false;
+  let introPlaybackToken = 0;
   let lottieRuntimePromise;
   let postcardLottiePlayed = false;
   let videoOverlay;
@@ -432,7 +433,13 @@
         z-index: 2147483643;
         display: grid;
         place-items: center;
+        opacity: 1;
+        transition: opacity 420ms ease-out;
         pointer-events: none;
+      }
+
+      #intro-lottie-overlay.is-fading {
+        opacity: 0;
       }
 
       #intro-lottie-overlay.hidden {
@@ -632,9 +639,10 @@
 
       #complete-overlay {
         background:
-          radial-gradient(circle at 26% 18%, rgba(255, 255, 255, 0.92), transparent 30%),
-          radial-gradient(circle at 80% 12%, rgba(255, 248, 220, 0.78), transparent 32%),
-          linear-gradient(180deg, #f8fffb 0%, #fff8e8 52%, #fff0ed 100%);
+          radial-gradient(circle at 50% 43%, rgba(224, 93, 19, 0.18), transparent 32%),
+          radial-gradient(circle at 18% 14%, rgba(104, 39, 140, 0.22), transparent 34%),
+          radial-gradient(circle at 84% 82%, rgba(70, 21, 96, 0.2), transparent 36%),
+          linear-gradient(180deg, #0b0610 0%, #16091d 52%, #050207 100%);
       }
 
       .complete-card {
@@ -643,7 +651,7 @@
         padding: 18px 18px 24px;
         border-radius: 24px;
         background: transparent;
-        color: #8b1f1f;
+        color: #f5b14c;
         text-align: center;
         display: grid;
         justify-items: center;
@@ -656,6 +664,7 @@
         width: min(70vw, 360px);
         height: min(70vw, 360px);
         max-height: min(46dvh, 360px);
+        filter: drop-shadow(0 18px 36px rgba(0, 0, 0, 0.58));
         pointer-events: none;
       }
 
@@ -671,10 +680,10 @@
         border: 0;
         border-radius: 999px;
         padding: 15px 30px;
-        background: linear-gradient(135deg, #183a8f, #2d79c7);
-        color: #fff;
+        background: linear-gradient(135deg, #ff9a2f, #d9550d);
+        color: #1b071f;
         font: 900 18px/1 "Segoe UI Variable Text", "Aptos", "Segoe UI", Arial, Helvetica, sans-serif;
-        box-shadow: 0 12px 28px rgba(24, 58, 143, 0.28);
+        box-shadow: 0 12px 30px rgba(217, 85, 13, 0.3), 0 0 0 1px rgba(255, 184, 82, 0.2);
       }
 
     `;
@@ -803,7 +812,7 @@
         '<div class="scan-corner br"></div>' +
         '<div class="scan-line"></div>' +
         '<div class="scan-guide-text">Place the object inside the frame.</div>' +
-        '<div class="scan-version">1.0.30</div>';
+        '<div class="scan-version">1.0.31</div>';
       document.body.appendChild(scanGuide);
     }
 
@@ -1590,29 +1599,49 @@
       return Promise.resolve();
     }
     introLottiePlayed = true;
-    if (introLottieOverlay) introLottieOverlay.classList.remove('hidden');
+    const playbackToken = ++introPlaybackToken;
+    if (introLottieOverlay) introLottieOverlay.classList.remove('hidden', 'is-fading');
     return ensureIntroLottie().then((animation) => new Promise((resolve) => {
       let finished = false;
+      let reversing = false;
+      let fallbackTimer;
+      const fadeDurationMs = 420;
       const finish = () => {
-        if (finished) return;
+        if (finished || playbackToken !== introPlaybackToken) return;
         finished = true;
-        revealPostcard();
-        animation.removeEventListener('complete', finish);
+        clearTimeout(fallbackTimer);
+        animation.removeEventListener('complete', handleComplete);
         animation.pause();
-        if (introLottieOverlay) introLottieOverlay.classList.add('hidden');
-        resolve();
+        if (introLottieOverlay) introLottieOverlay.classList.add('is-fading');
+        setTimeout(() => {
+          if (playbackToken !== introPlaybackToken) return;
+          if (introLottieOverlay) introLottieOverlay.classList.add('hidden');
+          revealPostcard();
+          resolve();
+        }, fadeDurationMs);
+      };
+      const handleComplete = () => {
+        if (finished || playbackToken !== introPlaybackToken) return;
+        if (!reversing) {
+          reversing = true;
+          animation.goToAndStop(Math.max(0, Number(animation.totalFrames || 1) - 1), true);
+          animation.setDirection(-1);
+          requestAnimationFrame(() => animation.play());
+          return;
+        }
+        finish();
       };
       animation.loop = false;
       animation.setDirection(1);
       animation.goToAndStop(0, true);
-      animation.addEventListener('complete', finish);
+      animation.addEventListener('complete', handleComplete);
       requestAnimationFrame(() => animation.play());
       const frameRate = Number(animation.frameRate || 0);
       const totalFrames = Number(animation.totalFrames || 0);
       const totalMs = frameRate > 0 && totalFrames > 0
         ? Math.round((totalFrames / frameRate) * 1000)
         : 5200;
-      setTimeout(finish, totalMs + 120);
+      fallbackTimer = setTimeout(finish, (totalMs * 2) + fadeDurationMs + 300);
     })).catch((error) => {
       console.warn('[Image Target AR] intro lottie failed:', error);
       if (introLottieOverlay) introLottieOverlay.classList.add('hidden');
@@ -1621,10 +1650,13 @@
   }
 
   function resetIntroLottie() {
+    introPlaybackToken += 1;
     introLottiePlayed = false;
     if (introLottieOverlay) introLottieOverlay.classList.add('hidden');
+    if (introLottieOverlay) introLottieOverlay.classList.remove('is-fading');
     if (!introLottieAnimation) return;
     introLottieAnimation.stop();
+    introLottieAnimation.setDirection(1);
     introLottieAnimation.goToAndStop(0, true);
   }
 
