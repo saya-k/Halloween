@@ -44,6 +44,12 @@
   let bootRequested = false;
   let xrLoadTimer = 0;
   let cameraRetryRevealTimer = 0;
+  let cameraStartupWatchdogTimer = 0;
+  let cameraRestartPending = false;
+  let cameraRestartAttempts = 0;
+  let cameraDetachResolver = null;
+  let cameraPausedForBackground = false;
+  let cameraVisibilityHandlersInstalled = false;
   let cameraDebugStatus = '';
   const state = {
     childName: localStorage.getItem(NAME_KEY) || '',
@@ -798,7 +804,7 @@
         '<div class="scan-corner br"></div>' +
         '<div class="scan-line"></div>' +
         '<div class="scan-guide-text">Place the object inside the frame.</div>' +
-        '<div class="scan-version">1.0.27</div>';
+        '<div class="scan-version">1.0.28</div>';
       document.body.appendChild(scanGuide);
     }
 
@@ -881,6 +887,11 @@
   function setCameraRetryVisible(visible) {
     ensureUi();
     if (cameraRetryButton) cameraRetryButton.classList.toggle('visible', Boolean(visible));
+  }
+
+  function setCameraRetryLabel() {
+    if (!cameraRetryButton) return;
+    cameraRetryButton.textContent = cameraRestartAttempts > 0 ? 'Reload page' : 'Try again';
   }
 
   function setPcTestButtonVisible(visible) {
@@ -974,11 +985,49 @@
     setCameraRetryVisible(false);
     setPcTestButtonVisible(false);
     clearTimeout(cameraRetryRevealTimer);
+    clearTimeout(cameraStartupWatchdogTimer);
     cameraRetryRevealTimer = setTimeout(() => {
       if (!waitingForCameraReady || cameraStarted) return;
-      if (cameraRetryButton) cameraRetryButton.textContent = 'Try again';
+      if (cameraDebugStatus === 'requesting' || cameraDebugStatus === 'hasStream') return;
+      setLoadingMessage('AR camera did not respond. Tap Try again.');
+      setCameraRetryLabel();
       setCameraRetryVisible(true);
-    }, 2500);
+    }, 12000);
+  }
+
+  function armCameraStartupWatchdog() {
+    clearTimeout(cameraStartupWatchdogTimer);
+    cameraStartupWatchdogTimer = setTimeout(() => {
+      if (!waitingForCameraReady || cameraStarted || cameraDebugStatus !== 'hasStream') return;
+      const action = cameraRestartAttempts > 0 ? 'Reload page' : 'Try again';
+      showCameraFailure(`Camera permission was granted, but the video did not start. Tap ${action}.`);
+    }, 7000);
+  }
+
+  function clearCameraStartupTimers() {
+    clearTimeout(cameraRetryRevealTimer);
+    clearTimeout(cameraStartupWatchdogTimer);
+  }
+
+  function waitForPipelineDetach(timeoutMs) {
+    return new Promise((resolve) => {
+      let settled = false;
+      let timer = 0;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (cameraDetachResolver === finish) cameraDetachResolver = null;
+        resolve();
+      };
+      if (cameraDetachResolver) cameraDetachResolver();
+      cameraDetachResolver = finish;
+      timer = setTimeout(finish, timeoutMs);
+    });
+  }
+
+  function delay(timeoutMs) {
+    return new Promise((resolve) => setTimeout(resolve, timeoutMs));
   }
 
   function showCameraFailure(message, error) {
@@ -986,32 +1035,97 @@
     cameraStarted = false;
     waitingForCameraReady = false;
     cameraPermissionInFlight = false;
-    clearTimeout(cameraRetryRevealTimer);
+    clearCameraStartupTimers();
     showLoadingOverlay();
     hideScanStatus();
     setLoadingMessage(message || 'AR camera failed. Check Safari camera permission and tap Try again.');
-    if (cameraRetryButton) cameraRetryButton.textContent = 'Try again';
+    setCameraRetryLabel();
     setCameraRetryVisible(true);
     setPcTestButtonVisible(true);
   }
 
-  function retryCameraFromUserGesture() {
+  function reloadForCameraRetry() {
+    const url = new URL(window.location.href);
+    url.searchParams.set('cameraRetry', String(Date.now()));
+    window.location.replace(url.toString());
+  }
+
+  async function retryCameraFromUserGesture() {
+    if (cameraRestartPending) return;
     if (!arPrepared) {
       requestCameraPermissionGate(true);
       return;
     }
 
-    if (appStarted && !cameraStarted) {
-      clearTimeout(cameraRetryRevealTimer);
-      try {
-        if (window.XR8 && typeof window.XR8.stop === 'function') window.XR8.stop();
-      } catch (error) {
-        console.warn('[Image Target AR] camera stop before retry failed:', error);
-      }
-      appStarted = false;
+    if (!appStarted) {
+      requestCameraPermissionGate(true);
+      return;
     }
 
-    requestCameraPermissionGate(true);
+    if (cameraRestartAttempts > 0) {
+      reloadForCameraRetry();
+      return;
+    }
+
+    cameraRestartPending = true;
+    if (cameraRetryButton) cameraRetryButton.disabled = true;
+    clearCameraStartupTimers();
+    setCameraRetryVisible(false);
+    setPcTestButtonVisible(false);
+    setLoadingMessage('Restarting AR camera...');
+
+    try {
+      if (appStarted && window.XR8 && typeof window.XR8.stop === 'function') {
+        const detached = waitForPipelineDetach(1400);
+        window.XR8.stop();
+        await detached;
+        appStarted = false;
+        await delay(350);
+      }
+
+      cameraRestartAttempts += 1;
+      cameraStarted = false;
+      waitingForCameraReady = false;
+      cameraPermissionInFlight = false;
+      cameraDebugStatus = '';
+      requestCameraPermissionGate(true);
+    } catch (error) {
+      console.warn('[Image Target AR] controlled camera restart failed:', error);
+      appStarted = false;
+      cameraRestartAttempts = Math.max(1, cameraRestartAttempts);
+      showCameraFailure('The camera could not restart. Tap Reload page.');
+    } finally {
+      cameraRestartPending = false;
+      if (cameraRetryButton) cameraRetryButton.disabled = false;
+    }
+  }
+
+  function installCameraVisibilityHandlers() {
+    if (cameraVisibilityHandlersInstalled) return;
+    cameraVisibilityHandlersInstalled = true;
+    document.addEventListener('visibilitychange', () => {
+      if (!appStarted || !window.XR8) return;
+      if (document.visibilityState === 'hidden' && cameraStarted && typeof window.XR8.pause === 'function') {
+        try {
+          window.XR8.pause();
+          cameraPausedForBackground = true;
+          cameraStarted = false;
+        } catch (error) {
+          console.warn('[Image Target AR] camera pause failed:', error);
+        }
+        return;
+      }
+      if (document.visibilityState === 'visible' && cameraPausedForBackground && typeof window.XR8.resume === 'function') {
+        cameraPausedForBackground = false;
+        cameraDebugStatus = '';
+        waitForCameraReady();
+        try {
+          window.XR8.resume();
+        } catch (error) {
+          showCameraFailure('The camera could not resume. Tap Try again.', error);
+        }
+      }
+    });
   }
 
   function setScanStatus(text) {
@@ -1156,12 +1270,15 @@
             } else if (status === 'hasStream') {
               cameraPermissionGranted = true;
               setLoadingMessage('Starting AR camera...');
+              clearTimeout(cameraRetryRevealTimer);
+              armCameraStartupWatchdog();
             } else if (status === 'hasVideo') {
               cameraPermissionGranted = true;
               cameraPermissionInFlight = false;
               cameraStarted = true;
               waitingForCameraReady = false;
-              clearTimeout(cameraRetryRevealTimer);
+              cameraRestartAttempts = 0;
+              clearCameraStartupTimers();
               hideLoadingOverlay();
               releaseLoadingLogo();
               setCameraRetryVisible(false);
@@ -1182,6 +1299,10 @@
           },
           onStart: () => {
             console.log('[Image Target AR] camera pipeline started');
+          },
+          onDetach: () => {
+            cameraStarted = false;
+            if (cameraDetachResolver) cameraDetachResolver();
           },
           listeners: [
             {
@@ -1668,6 +1789,7 @@
 
   installStyles();
   ensureUi();
+  installCameraVisibilityHandlers();
   showLoadingOverlay();
   hideScanStatus();
   requestCameraPermissionGate(false);
