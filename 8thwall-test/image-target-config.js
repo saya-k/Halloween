@@ -718,7 +718,7 @@
         <div id="name-gate" class="hidden">
           <div class="name-card">
             <h1>Enter child name</h1>
-            <p>Santa will say this name before the greeting.</p>
+            <p>Your Halloween greeting will use this name.</p>
             <input id="child-name-input" type="text" maxlength="24" autocomplete="given-name" placeholder="Child name" />
             <div id="name-error" class="name-error"></div>
             <button id="save-name-button" type="button">Start scanning</button>
@@ -727,7 +727,7 @@
         <div id="pc-test-panel" class="hidden">
           <div class="pc-test-card">
             <h2>PC test mode</h2>
-            <p>Choose a test target to run the Christmas flow without a camera.</p>
+            <p>Choose a test target to run the Halloween flow without a camera.</p>
             <div class="pc-test-targets">
               <button type="button" data-pc-test-target="1">1</button>
               <button type="button" data-pc-test-target="2">2</button>
@@ -737,13 +737,13 @@
             </div>
           </div>
         </div>
-        <button id="postcard-button" class="hidden" type="button" aria-label="Open Santa's postcard">
+        <button id="postcard-button" class="hidden" type="button" aria-label="Open the Halloween postcard">
           <span id="postcard-lottie" class="postcard-lottie" aria-hidden="true"></span>
           <span class="postcard-hitbox" aria-hidden="true"></span>
           <span class="postcard-copy">
             <span class="postcard-title">
               <span>Open your</span>
-              <span>Christmas postcard</span>
+              <span>Halloween postcard</span>
             </span>
           </span>
         </button>
@@ -812,7 +812,7 @@
         '<div class="scan-corner br"></div>' +
         '<div class="scan-line"></div>' +
         '<div class="scan-guide-text">Place the object inside the frame.</div>' +
-        '<div class="scan-version">1.0.34</div>';
+        '<div class="scan-version">1.0.35</div>';
       document.body.appendChild(scanGuide);
     }
 
@@ -1753,9 +1753,9 @@
       }
 
       try { speechSynthesis.cancel(); } catch {}
-      const utterance = new SpeechSynthesisUtterance(`Hey! ${nameForSpeech(state.childName)}. Merry Christmas! Open Santa's postcard!`);
+      const utterance = new SpeechSynthesisUtterance(`Hey, ${nameForSpeech(state.childName)}! Happy Halloween! Your spooky postcard is ready. Tap to open it!`);
       utterance.lang = 'en-US';
-      utterance.rate = 0.82;
+      utterance.rate = 0.9;
       utterance.pitch = 0.84;
       utterance.volume = 1;
       const voices = speechSynthesis.getVoices ? speechSynthesis.getVoices() : [];
